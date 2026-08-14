@@ -1,0 +1,57 @@
+{
+  "job_titles": [
+    "Videographer",
+    "Video Editor",
+    "Video Producer",
+    "Content Creator",
+    "Content Producer",
+    "Filmmaker",
+    "Creative Producer",
+    "Senior Video Editor"
+  ],
+  "locations": [
+    "United Kingdom",
+    "Canada",
+    "Australia",
+    "Germany",
+    "Netherlands",
+    "Ireland",
+    "Sweden",
+    "France",
+    "United States",
+    "Remote"
+  ],
+  "exclude_locations": [
+    "United Arab Emirates",
+    "UAE",
+    "Dubai",
+    "Abu Dhabi",
+    "Saudi Arabia",
+    "Qatar",
+    "Kuwait",
+    "Bahrain",
+    "Oman"
+  ],
+  "minimum_salary": 50000,
+  "currency": "USD",
+  "experience_level": [
+    "Mid-level",
+    "Senior",
+    "Lead"
+  ],
+  "priority": [
+    "High salary",
+    "International relocation",
+    "Visa sponsorship",
+    "Remote",
+    "Creative industry",
+    "Film",
+    "Media",
+    "Advertising",
+    "Production",
+    "Technology",
+    "Entertainment"
+  ],
+  "send_to_telegram": true,
+  "max_jobs_per_day": 10
+}
