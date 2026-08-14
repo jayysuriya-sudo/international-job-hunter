@@ -1,0 +1,26 @@
+name: International Job Hunter
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 4 * * *"
+
+jobs:
+  search-jobs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run job search
+        run: |
+          python job_search.py
+
+      - name: Send jobs to Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN_NEW }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python notify_telegram.py
