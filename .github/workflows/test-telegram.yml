@@ -1,18 +1,20 @@
-name: Test Telegram Connection
+name: Telegram Secret Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-telegram:
+  test:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Send test message
+      - name: Check Telegram token
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN_NEW }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TOKEN: ${{ secrets.TELEGRAM_TOKEN_NEW }}
         run: |
-          curl --fail --silent --show-error \
-            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            --data-urlencode text="🤖 Jay's International Job Hunter is connected! Telegram: Connected ✅ GitHub Actions: Connected ✅ Job search system: Ready 🔎"
+          if [ -z "$TOKEN" ]; then
+            echo "❌ TOKEN IS EMPTY"
+            exit 1
+          else
+            echo "✅ TOKEN EXISTS IN GITHUB"
+          fi
