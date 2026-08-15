@@ -2,9 +2,8 @@ name: International Job Hunter
 
 on:
   workflow_dispatch:
-
   schedule:
-    - cron: "0 4 * * *"
+    - cron: "30 5 * * *"
 
 jobs:
   search-jobs:
@@ -14,13 +13,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run job search
-        run: |
-          python job_search.py
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Send jobs to Telegram
+      - name: Run job search
+        run: python job_search.py
+
+      - name: Send jobs to telegram
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN_NEW }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python notify_telegram.py
+        run: python notify_telegram.py
+
+      - name: Show completion
+        run: echo "✅ Job search and Telegram notification completed"
