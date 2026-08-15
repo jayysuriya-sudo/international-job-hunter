@@ -2,23 +2,32 @@
   "job_titles": [
     "Videographer",
     "Video Editor",
+    "Senior Video Editor",
     "Video Producer",
+    "Senior Video Producer",
     "Content Creator",
     "Content Producer",
-    "Filmmaker",
     "Creative Producer",
-    "Senior Video Editor"
+    "Film Editor",
+    "Post Production",
+    "Multimedia Producer",
+    "Motion Designer",
+    "Motion Graphics Designer",
+    "Social Video Producer",
+    "Brand Content Producer"
   ],
   "locations": [
     "United Kingdom",
     "Canada",
     "Australia",
+    "United States",
     "Germany",
     "Netherlands",
     "Ireland",
     "Sweden",
     "France",
-    "United States",
+    "Singapore",
+    "New Zealand",
     "Remote"
   ],
   "exclude_locations": [
@@ -37,20 +46,24 @@
   "experience_level": [
     "Mid-level",
     "Senior",
-    "Lead"
+    "Lead",
+    "Manager"
   ],
   "priority": [
     "High salary",
-    "International relocation",
     "Visa sponsorship",
+    "Relocation",
     "Remote",
-    "Creative industry",
     "Film",
     "Media",
     "Advertising",
     "Production",
     "Technology",
-    "Entertainment"
+    "Entertainment",
+    "Fashion",
+    "Sports",
+    "Marketing",
+    "Creative Agency"
   ],
   "send_to_telegram": true,
   "max_jobs_per_day": 10
