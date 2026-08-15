@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import urllib.request
 from datetime import datetime, timezone
@@ -8,9 +7,9 @@ CONFIG_FILE = "config.json"
 COMPANIES_FILE = "companies.json"
 
 
-# ==================================================
+# ============================================================
 # FILE HELPERS
-# ==================================================
+# ============================================================
 
 def load_json_file(filename, default=None):
     try:
@@ -21,25 +20,21 @@ def load_json_file(filename, default=None):
         return default if default is not None else {}
 
 
-# ==================================================
-# WEB REQUEST
-# ==================================================
+# ============================================================
+# HTTP / JSON
+# ============================================================
 
 def get_json(url):
     try:
         request = urllib.request.Request(
             url,
             headers={
-                "User-Agent": "Mozilla/5.0 InternationalJobHunter/4.0",
+                "User-Agent": "Mozilla/5.0 InternationalJobHunter/5.0",
                 "Accept": "application/json"
             }
         )
 
-        with urllib.request.urlopen(
-            request,
-            timeout=20
-        ) as response:
-
+        with urllib.request.urlopen(request, timeout=20) as response:
             return json.loads(
                 response.read().decode("utf-8")
             )
@@ -50,9 +45,9 @@ def get_json(url):
         return None
 
 
-# ==================================================
-# CLEAN TEXT
-# ==================================================
+# ============================================================
+# TEXT CLEANING
+# ============================================================
 
 def clean_html(text):
 
@@ -66,6 +61,20 @@ def clean_html(text):
     )
 
     text = re.sub(
+        r"&nbsp;",
+        " ",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    text = re.sub(
+        r"&amp;",
+        "&",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    text = re.sub(
         r"\s+",
         " ",
         text
@@ -74,9 +83,9 @@ def clean_html(text):
     return text.strip()
 
 
-# ==================================================
+# ============================================================
 # JOB KEYWORDS
-# ==================================================
+# ============================================================
 
 PRIMARY_ROLES = [
     "videographer",
@@ -90,7 +99,11 @@ PRIMARY_ROLES = [
     "film editor",
     "filmmaker",
     "video director",
-    "content director"
+    "content director",
+    "motion designer",
+    "motion design",
+    "motion graphics designer",
+    "motion graphics"
 ]
 
 SECONDARY_ROLES = [
@@ -104,11 +117,11 @@ SECONDARY_ROLES = [
     "brand content",
     "brand video",
     "creative content",
-    "motion designer",
-    "motion graphics",
-    "motion graphic",
     "visual content",
-    "digital content producer"
+    "digital content producer",
+    "video content producer",
+    "creative video",
+    "content production"
 ]
 
 
@@ -127,9 +140,9 @@ def matches_title(title):
     )
 
 
-# ==================================================
+# ============================================================
 # EXCLUDED LOCATIONS
-# ==================================================
+# ============================================================
 
 def is_excluded(job, config):
 
@@ -154,9 +167,9 @@ def is_excluded(job, config):
     return False
 
 
-# ==================================================
+# ============================================================
 # GREENHOUSE
-# ==================================================
+# ============================================================
 
 def fetch_greenhouse(company):
 
@@ -176,6 +189,7 @@ def fetch_greenhouse(company):
     for item in data.get("jobs", []):
 
         jobs.append({
+            "id": item.get("id"),
             "title": item.get(
                 "title",
                 ""
@@ -198,15 +212,183 @@ def fetch_greenhouse(company):
                     ""
                 )
             ),
-            "source": "Greenhouse"
+            "source": "Greenhouse",
+            "greenhouse_company": company
         })
 
     return jobs
 
 
-# ==================================================
+# ============================================================
+# GREENHOUSE PAY TRANSPARENCY
+# ============================================================
+
+def enrich_greenhouse_salary(job):
+
+    job_id = job.get("id")
+    company = job.get(
+        "greenhouse_company",
+        ""
+    )
+
+    if not job_id or not company:
+        return job
+
+    url = (
+        "https://boards-api.greenhouse.io/v1/boards/"
+        + company
+        + "/jobs/"
+        + str(job_id)
+        + "?pay_transparency=true"
+    )
+
+    data = get_json(url)
+
+    if not data:
+        return job
+
+    # Replace description with detailed description
+    detailed_description = data.get(
+        "content",
+        ""
+    )
+
+    if detailed_description:
+        job["description"] = clean_html(
+            detailed_description
+        )
+
+    pay_ranges = data.get(
+        "pay_input_ranges",
+        []
+    )
+
+    if not pay_ranges:
+        return job
+
+    # Keep all available ranges
+    ranges = []
+
+    for pay in pay_ranges:
+
+        minimum = pay.get(
+            "min_cents"
+        )
+
+        maximum = pay.get(
+            "max_cents"
+        )
+
+        currency = pay.get(
+            "currency_type",
+            "USD"
+        )
+
+        if minimum is None and maximum is None:
+            continue
+
+        minimum_value = (
+            minimum / 100
+            if minimum is not None
+            else None
+        )
+
+        maximum_value = (
+            maximum / 100
+            if maximum is not None
+            else None
+        )
+
+        ranges.append({
+            "min": minimum_value,
+            "max": maximum_value,
+            "currency": currency,
+            "title": pay.get(
+                "title",
+                ""
+            ),
+            "blurb": pay.get(
+                "blurb",
+                ""
+            )
+        })
+
+    if ranges:
+
+        job["pay_ranges"] = ranges
+
+        # Use first range as primary display
+        primary = ranges[0]
+
+        minimum = primary["min"]
+        maximum = primary["max"]
+        currency = primary["currency"]
+
+        if minimum is not None and maximum is not None:
+
+            job["salary"] = (
+                f"{format_money(minimum, currency)}"
+                f" – "
+                f"{format_money(maximum, currency)}"
+                f" / year"
+            )
+
+        elif minimum is not None:
+
+            job["salary"] = (
+                f"From "
+                f"{format_money(minimum, currency)}"
+                f" / year"
+            )
+
+        elif maximum is not None:
+
+            job["salary"] = (
+                f"Up to "
+                f"{format_money(maximum, currency)}"
+                f" / year"
+            )
+
+    return job
+
+
+# ============================================================
+# MONEY FORMAT
+# ============================================================
+
+def format_money(value, currency):
+
+    symbols = {
+        "USD": "$",
+        "CAD": "C$",
+        "AUD": "A$",
+        "GBP": "£",
+        "EUR": "€",
+        "SGD": "S$",
+        "NZD": "NZ$"
+    }
+
+    symbol = symbols.get(
+        currency,
+        currency + " "
+    )
+
+    if value >= 1000:
+
+        return (
+            symbol
+            + f"{value:,.0f}"
+        )
+
+    return (
+        symbol
+        + f"{value:,.2f}"
+    )
+
+
+# ============================================================
 # LEVER
-# ==================================================
+# ============================================================
 
 def fetch_lever(company):
 
@@ -259,9 +441,9 @@ def fetch_lever(company):
     return jobs
 
 
-# ==================================================
+# ============================================================
 # ASHBY
-# ==================================================
+# ============================================================
 
 def fetch_ashby(company):
 
@@ -312,9 +494,9 @@ def fetch_ashby(company):
     return jobs
 
 
-# ==================================================
+# ============================================================
 # REMOTIVE
-# ==================================================
+# ============================================================
 
 def fetch_remotive():
 
@@ -364,9 +546,9 @@ def fetch_remotive():
     return jobs
 
 
-# ==================================================
+# ============================================================
 # ARBEITNOW
-# ==================================================
+# ============================================================
 
 def fetch_arbeitnow():
 
@@ -416,9 +598,9 @@ def fetch_arbeitnow():
     return jobs
 
 
-# ==================================================
+# ============================================================
 # JOBICY
-# ==================================================
+# ============================================================
 
 def fetch_jobicy():
 
@@ -468,23 +650,29 @@ def fetch_jobicy():
     return jobs
 
 
-# ==================================================
+# ============================================================
 # SALARY DETECTION
-# ==================================================
+# ============================================================
 
-def salary_score(job):
-
-    text = (
-        job.get("title", "")
-        + " "
-        + job.get("description", "")
-    )
+def detect_salary_from_text(text):
 
     patterns = [
-        r"\$[\d,]+(?:\s*-\s*\$?[\d,]+)?",
-        r"£[\d,]+(?:\s*-\s*£?[\d,]+)?",
-        r"€[\d,]+(?:\s*-\s*€?[\d,]+)?",
-        r"\b\d{2,3}k(?:\s*-\s*\d{2,3}k)?"
+        (
+            r"\$[\d,]+(?:\.\d+)?"
+            r"(?:\s*[-–]\s*\$?[\d,]+(?:\.\d+)?)?"
+        ),
+        (
+            r"£[\d,]+(?:\.\d+)?"
+            r"(?:\s*[-–]\s*£?[\d,]+(?:\.\d+)?)?"
+        ),
+        (
+            r"€[\d,]+(?:\.\d+)?"
+            r"(?:\s*[-–]\s*€?[\d,]+(?:\.\d+)?)?"
+        ),
+        (
+            r"\b\d{2,3}k"
+            r"(?:\s*[-–]\s*\d{2,3}k)?"
+        )
     ]
 
     for pattern in patterns:
@@ -495,10 +683,92 @@ def salary_score(job):
             re.IGNORECASE
         )
 
-        if not match:
-            continue
+        if match:
 
-        salary = match.group(0)
+            return match.group(0)
+
+    return None
+
+
+def salary_score(job):
+
+    # Greenhouse structured salary
+    pay_ranges = job.get(
+        "pay_ranges",
+        []
+    )
+
+    if pay_ranges:
+
+        highest_value = 0
+
+        for pay in pay_ranges:
+
+            minimum = pay.get(
+                "min"
+            ) or 0
+
+            maximum = pay.get(
+                "max"
+            ) or 0
+
+            highest_value = max(
+                highest_value,
+                minimum,
+                maximum
+            )
+
+        currency = pay_ranges[0].get(
+            "currency",
+            "USD"
+        )
+
+        # Store approximate numeric value
+        job["salary_max_value"] = (
+            highest_value
+        )
+
+        # Strong scoring
+        if highest_value >= 150000:
+            return 40
+
+        if highest_value >= 120000:
+            return 38
+
+        if highest_value >= 100000:
+            return 35
+
+        if highest_value >= 80000:
+            return 32
+
+        if highest_value >= 70000:
+            return 28
+
+        if highest_value >= 60000:
+            return 24
+
+        if highest_value >= 50000:
+            return 20
+
+        if highest_value >= 40000:
+            return 14
+
+        return 8
+
+    # Text-based salary detection
+    text = (
+        job.get("title", "")
+        + " "
+        + job.get("description", "")
+    )
+
+    salary = detect_salary_from_text(
+        text
+    )
+
+    if salary:
+
+        job["salary"] = salary
 
         numbers = re.findall(
             r"\d+(?:,\d+)?",
@@ -511,52 +781,62 @@ def salary_score(job):
 
             try:
 
+                value = int(
+                    number.replace(
+                        ",",
+                        ""
+                    )
+                )
+
+                # Convert k values
+                if "k" in salary.lower():
+                    value *= 1000
+
                 highest = max(
                     highest,
-                    int(
-                        number.replace(
-                            ",",
-                            ""
-                        )
-                    )
+                    value
                 )
 
             except ValueError:
                 pass
 
-        job["salary"] = salary
+        job["salary_max_value"] = highest
 
-        if highest >= 100000:
+        if highest >= 150000:
             return 40
 
-        if highest >= 80000:
+        if highest >= 120000:
+            return 38
+
+        if highest >= 100000:
             return 35
 
+        if highest >= 80000:
+            return 32
+
         if highest >= 70000:
-            return 30
+            return 28
 
         if highest >= 60000:
-            return 27
-
-        if highest >= 50000:
             return 24
 
+        if highest >= 50000:
+            return 20
+
         if highest >= 40000:
-            return 15
+            return 14
 
-        if highest >= 30000:
-            return 8
-
-        return 3
+        return 8
 
     job["salary"] = "Not listed"
+    job["salary_max_value"] = 0
 
     return 0
 
 
-# ==================================================
+# ============================================================
 # VISA / RELOCATION
-# ==================================================
+# ============================================================
 
 def international_score(job):
 
@@ -574,7 +854,8 @@ def international_score(job):
         "work permit",
         "sponsorship available",
         "immigration support",
-        "sponsor visa"
+        "sponsor visa",
+        "visa assistance"
     ]
 
     relocation_keywords = [
@@ -584,24 +865,78 @@ def international_score(job):
         "relocation"
     ]
 
-    score = 0
+    no_sponsorship_keywords = [
+        "no visa sponsorship",
+        "without sponsorship",
+        "unable to sponsor",
+        "will not sponsor",
+        "does not sponsor",
+        "not eligible for sponsorship"
+    ]
+
+    for keyword in no_sponsorship_keywords:
+
+        if keyword in text:
+
+            job["visa_status"] = (
+                "🚫 Sponsorship not available"
+            )
+
+            return -10
+
+    visa_found = False
+    relocation_found = False
 
     for keyword in visa_keywords:
 
         if keyword in text:
-            score += 20
+
+            visa_found = True
+            break
 
     for keyword in relocation_keywords:
 
         if keyword in text:
-            score += 10
+
+            relocation_found = True
+            break
+
+    score = 0
+
+    if visa_found:
+
+        job["visa_status"] = (
+            "🛂 Sponsorship mentioned"
+        )
+
+        score += 25
+
+    else:
+
+        job["visa_status"] = (
+            "❓ Not mentioned"
+        )
+
+    if relocation_found:
+
+        job["relocation_status"] = (
+            "✈️ Relocation mentioned"
+        )
+
+        score += 10
+
+    else:
+
+        job["relocation_status"] = (
+            "❓ Not mentioned"
+        )
 
     return score
 
 
-# ==================================================
+# ============================================================
 # LOCATION SCORE
-# ==================================================
+# ============================================================
 
 def location_score(job):
 
@@ -611,7 +946,7 @@ def location_score(job):
         + job.get("description", "")
     ).lower()
 
-    countries = [
+    preferred_locations = [
         "united kingdom",
         "uk",
         "london",
@@ -647,20 +982,22 @@ def location_score(job):
 
     score = 0
 
-    for country in countries:
+    for location in preferred_locations:
 
-        if country in text:
+        if location in text:
+
             score += 5
 
     if "remote" in text:
+
         score += 20
 
     return score
 
 
-# ==================================================
+# ============================================================
 # SENIORITY
-# ==================================================
+# ============================================================
 
 def seniority_score(job):
 
@@ -692,9 +1029,9 @@ def seniority_score(job):
     return score
 
 
-# ==================================================
-# ROLE RELEVANCE
-# ==================================================
+# ============================================================
+# ROLE SCORE
+# ============================================================
 
 def role_score(job):
 
@@ -715,7 +1052,7 @@ def role_score(job):
     if "video producer" in title:
         score += 35
 
-    # Very relevant
+    # Strong
     if "content producer" in title:
         score += 30
 
@@ -731,13 +1068,17 @@ def role_score(job):
     if "film editor" in title:
         score += 28
 
-    # Relevant
+    # Motion
     if "motion designer" in title:
-        score += 22
+        score += 30
+
+    if "motion design" in title:
+        score += 28
 
     if "motion graphics" in title:
-        score += 22
+        score += 28
 
+    # Other relevant roles
     if "post production" in title:
         score += 22
 
@@ -753,9 +1094,9 @@ def role_score(job):
     return score
 
 
-# ==================================================
-# SKILL / INDUSTRY RELEVANCE
-# ==================================================
+# ============================================================
+# SKILLS
+# ============================================================
 
 def skill_score(job):
 
@@ -772,6 +1113,8 @@ def skill_score(job):
         "davinci resolve",
         "final cut pro",
         "capcut",
+        "cinema 4d",
+        "houdini",
         "cinematography",
         "camera",
         "lighting",
@@ -786,15 +1129,24 @@ def skill_score(job):
         "youtube",
         "commercial",
         "advertising",
-        "brand content"
+        "brand content",
+        "motion graphics",
+        "motion design"
     ]
 
     score = 0
+    matched = []
 
     for skill in skills:
 
         if skill in text:
+
             score += 2
+            matched.append(
+                skill
+            )
+
+    job["matched_skills"] = matched[:8]
 
     return min(
         score,
@@ -802,9 +1154,9 @@ def skill_score(job):
     )
 
 
-# ==================================================
-# COMPANY / INDUSTRY QUALITY
-# ==================================================
+# ============================================================
+# INDUSTRY SCORE
+# ============================================================
 
 def industry_score(job):
 
@@ -828,7 +1180,9 @@ def industry_score(job):
         "fashion",
         "sports",
         "streaming",
-        "studio"
+        "studio",
+        "experiential",
+        "events"
     ]
 
     score = 0
@@ -836,6 +1190,7 @@ def industry_score(job):
     for industry in industries:
 
         if industry in text:
+
             score += 3
 
     return min(
@@ -844,9 +1199,9 @@ def industry_score(job):
     )
 
 
-# ==================================================
+# ============================================================
 # DIRECT EMPLOYER BONUS
-# ==================================================
+# ============================================================
 
 def source_score(job):
 
@@ -860,62 +1215,274 @@ def source_score(job):
         "Lever",
         "Ashby"
     ]:
+
         return 10
 
     return 0
 
 
-# ==================================================
-# FINAL PERSONALIZED SCORE
-# ==================================================
+# ============================================================
+# MATCH REASONS
+# ============================================================
+
+def build_match_reasons(job):
+
+    reasons = []
+
+    title = job.get(
+        "title",
+        ""
+    ).lower()
+
+    description = job.get(
+        "description",
+        ""
+    ).lower()
+
+    if (
+        "video editor" in title
+        or "videographer" in title
+        or "video producer" in title
+    ):
+
+        reasons.append(
+            "🎥 Strong video role"
+        )
+
+    elif (
+        "motion designer" in title
+        or "motion design" in title
+        or "motion graphics" in title
+    ):
+
+        reasons.append(
+            "🎨 Motion/visual design role"
+        )
+
+    elif (
+        "content" in title
+        or "creative" in title
+    ):
+
+        reasons.append(
+            "🎬 Creative/content role"
+        )
+
+    if job.get(
+        "salary_max_value",
+        0
+    ) >= 100000:
+
+        reasons.append(
+            "💰 High salary"
+        )
+
+    elif job.get(
+        "salary_max_value",
+        0
+    ) >= 70000:
+
+        reasons.append(
+            "💰 Strong salary"
+        )
+
+    if (
+        "visa_status" in job
+        and "Sponsorship mentioned"
+        in job["visa_status"]
+    ):
+
+        reasons.append(
+            "🛂 Sponsorship mentioned"
+        )
+
+    if (
+        "relocation_status" in job
+        and "Relocation mentioned"
+        in job["relocation_status"]
+    ):
+
+        reasons.append(
+            "✈️ Relocation mentioned"
+        )
+
+    if "remote" in (
+        job.get(
+            "location",
+            ""
+        )
+        + " "
+        + job.get(
+            "description",
+            ""
+        )
+    ).lower():
+
+        reasons.append(
+            "🏠 Remote opportunity"
+        )
+
+    if (
+        "senior" in title
+        or "lead" in title
+        or "director" in title
+        or "manager" in title
+    ):
+
+        reasons.append(
+            "🧑‍💼 Senior-level opportunity"
+        )
+
+    if (
+        "after effects" in description
+        or "premiere pro" in description
+        or "cinema 4d" in description
+        or "houdini" in description
+    ):
+
+        reasons.append(
+            "🛠️ Relevant creative software"
+        )
+
+    if (
+        "film" in description
+        or "production" in description
+        or "advertising" in description
+        or "brand" in description
+    ):
+
+        reasons.append(
+            "🏢 Creative/media industry"
+        )
+
+    return reasons[:6]
+
+
+# ============================================================
+# FINAL SCORE
+# ============================================================
 
 def score_job(job):
 
     total = 0
 
-    total += role_score(job)
+    total += role_score(
+        job
+    )
 
-    total += salary_score(job)
+    total += salary_score(
+        job
+    )
 
-    total += international_score(job)
+    total += international_score(
+        job
+    )
 
-    total += location_score(job)
+    total += location_score(
+        job
+    )
 
-    total += seniority_score(job)
+    total += seniority_score(
+        job
+    )
 
-    total += skill_score(job)
+    total += skill_score(
+        job
+    )
 
-    total += industry_score(job)
+    total += industry_score(
+        job
+    )
 
-    total += source_score(job)
+    total += source_score(
+        job
+    )
 
-    # Keep score readable
+    # Cap at 100
     job["score"] = min(
         total,
         100
     )
 
-    # Classification
-    score = job["score"]
+    if job["score"] >= 90:
 
-    if score >= 90:
-        job["rating"] = "🔥 EXCELLENT"
+        job["rating"] = (
+            "🔥 EXCELLENT"
+        )
 
-    elif score >= 75:
-        job["rating"] = "🟢 STRONG"
+    elif job["score"] >= 75:
 
-    elif score >= 60:
-        job["rating"] = "🟡 REVIEW"
+        job["rating"] = (
+            "🟢 STRONG"
+        )
+
+    elif job["score"] >= 60:
+
+        job["rating"] = (
+            "🟡 REVIEW"
+        )
 
     else:
-        job["rating"] = "⚪ LOW"
+
+        job["rating"] = (
+            "⚪ LOW"
+        )
+
+    job["match_reasons"] = (
+        build_match_reasons(
+            job
+        )
+    )
 
     return job["score"]
 
 
-# ==================================================
+# ============================================================
+# ENRICH GREENHOUSE JOBS
+# ============================================================
+
+def enrich_matching_greenhouse_jobs(
+    jobs
+):
+
+    enriched = []
+
+    for job in jobs:
+
+        # Only spend API calls on relevant jobs
+        if not matches_title(
+            job.get(
+                "title",
+                ""
+            )
+        ):
+
+            continue
+
+        print(
+            "💰 Checking salary: "
+            + job.get(
+                "title",
+                ""
+            )
+        )
+
+        enriched_job = (
+            enrich_greenhouse_salary(
+                job
+            )
+        )
+
+        enriched.append(
+            enriched_job
+        )
+
+    return enriched
+
+
+# ============================================================
 # MAIN
-# ==================================================
+# ============================================================
 
 def main():
 
@@ -924,7 +1491,7 @@ def main():
     )
 
     print(
-        "🌍 INTERNATIONAL JOB HUNTER 4.0"
+        "🌍 INTERNATIONAL JOB HUNTER 5.0"
     )
 
     print(
@@ -943,9 +1510,9 @@ def main():
 
     all_jobs = []
 
-    # ------------------------------------------
+    # ========================================================
     # COMPANY CAREER BOARDS
-    # ------------------------------------------
+    # ========================================================
 
     print("")
     print(
@@ -956,6 +1523,10 @@ def main():
         "------------------------------------------"
     )
 
+    # ---------------- GREENHOUSE ----------------
+
+    greenhouse_jobs = []
+
     for company in companies.get(
         "greenhouse",
         []
@@ -965,11 +1536,31 @@ def main():
             f"🔎 Greenhouse: {company}"
         )
 
-        all_jobs.extend(
-            fetch_greenhouse(
-                company
-            )
+        jobs = fetch_greenhouse(
+            company
         )
+
+        greenhouse_jobs.extend(
+            jobs
+        )
+
+    print("")
+    print(
+        "💰 CHECKING PAY TRANSPARENCY "
+        "FOR RELEVANT GREENHOUSE JOBS"
+    )
+
+    greenhouse_jobs = (
+        enrich_matching_greenhouse_jobs(
+            greenhouse_jobs
+        )
+    )
+
+    all_jobs.extend(
+        greenhouse_jobs
+    )
+
+    # ---------------- LEVER ----------------
 
     for company in companies.get(
         "lever",
@@ -986,6 +1577,8 @@ def main():
             )
         )
 
+    # ---------------- ASHBY ----------------
+
     for company in companies.get(
         "ashby",
         []
@@ -1001,9 +1594,9 @@ def main():
             )
         )
 
-    # ------------------------------------------
+    # ========================================================
     # GENERAL JOB BOARDS
-    # ------------------------------------------
+    # ========================================================
 
     print("")
     print(
@@ -1038,15 +1631,19 @@ def main():
         fetch_jobicy()
     )
 
+    # ========================================================
+    # TOTAL
+    # ========================================================
+
     print("")
     print(
         f"📊 TOTAL JOBS FOUND: "
         f"{len(all_jobs)}"
     )
 
-    # ------------------------------------------
+    # ========================================================
     # FILTER
-    # ------------------------------------------
+    # ========================================================
 
     filtered = []
 
@@ -1077,17 +1674,21 @@ def main():
         ):
             continue
 
-        score_job(job)
+        score_job(
+            job
+        )
 
-        # Don't send weak matches
+        # Minimum quality
         if job["score"] < 60:
             continue
 
-        filtered.append(job)
+        filtered.append(
+            job
+        )
 
-    # ------------------------------------------
+    # ========================================================
     # REMOVE DUPLICATES
-    # ------------------------------------------
+    # ========================================================
 
     unique = {}
 
@@ -1099,33 +1700,43 @@ def main():
         )
 
         if url and url not in unique:
+
             unique[url] = job
 
     filtered = list(
         unique.values()
     )
 
-    # ------------------------------------------
-    # SORT BEST FIRST
-    # ------------------------------------------
+    # ========================================================
+    # SORT
+    # ========================================================
 
     filtered.sort(
-        key=lambda job: job["score"],
+        key=lambda job: (
+            job.get(
+                "score",
+                0
+            ),
+            job.get(
+                "salary_max_value",
+                0
+            )
+        ),
         reverse=True
     )
 
-    # ------------------------------------------
-    # TOP JOBS
-    # ------------------------------------------
+    # ========================================================
+    # LIMIT
+    # ========================================================
 
-    max_jobs = config.get(
+    configured_limit = config.get(
         "max_jobs_per_day",
         10
     )
 
-    # Allow up to 15 good opportunities
+    # Minimum 15 if there are enough
     max_jobs = max(
-        max_jobs,
+        configured_limit,
         15
     )
 
@@ -1133,17 +1744,22 @@ def main():
         :max_jobs
     ]
 
+    # ========================================================
+    # RESULTS
+    # ========================================================
+
     print("")
     print(
         f"⭐ STRONG MATCHES: "
         f"{len(filtered)}"
     )
 
-    # ------------------------------------------
-    # SAVE RESULTS
-    # ------------------------------------------
+    # ========================================================
+    # SAVE
+    # ========================================================
 
     output = {
+
         "generated_at":
             datetime.now(
                 timezone.utc
@@ -1172,31 +1788,32 @@ def main():
             ensure_ascii=False
         )
 
-    # ------------------------------------------
-    # PRINT RESULTS
-    # ------------------------------------------
+    # ========================================================
+    # PRINT TOP RESULTS
+    # ========================================================
+
+    print("")
 
     for number, job in enumerate(
         filtered,
         1
     ):
 
-        print("")
         print(
             f"#{number} "
-            f"{job['rating']}"
+            f"{job.get('rating', '')}"
         )
 
         print(
-            f"💼 {job['title']}"
+            f"💼 {job.get('title', '')}"
         )
 
         print(
-            f"🏢 {job['company']}"
+            f"🏢 {job.get('company', '')}"
         )
 
         print(
-            f"📍 {job['location']}"
+            f"📍 {job.get('location', '')}"
         )
 
         print(
@@ -1205,15 +1822,46 @@ def main():
 
         print(
             f"⭐ Score: "
-            f"{job['score']}/100"
+            f"{job.get('score', 0)}/100"
         )
 
         print(
-            f"🔎 {job['source']}"
+            f"🛂 "
+            f"{job.get('visa_status', '❓ Not mentioned')}"
         )
 
         print(
-            f"🔗 {job['url']}"
+            f"✈️ "
+            f"{job.get('relocation_status', '❓ Not mentioned')}"
+        )
+
+        print(
+            f"🔎 {job.get('source', '')}"
+        )
+
+        print(
+            f"🔗 {job.get('url', '')}"
+        )
+
+        reasons = job.get(
+            "match_reasons",
+            []
+        )
+
+        if reasons:
+
+            print(
+                "Why it matches:"
+            )
+
+            for reason in reasons:
+
+                print(
+                    f"  {reason}"
+                )
+
+        print(
+            "------------------------------------------"
         )
 
     print("")
