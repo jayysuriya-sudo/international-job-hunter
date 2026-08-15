@@ -8,6 +8,35 @@ from datetime import datetime
 CONFIG_FILE = "config.json"
 
 
+# --------------------------------------------------
+# LOAD CONFIG
+# --------------------------------------------------
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        print(f"ERROR: {CONFIG_FILE} not found.")
+        return {
+            "exclude_locations": [
+                "uae",
+                "dubai",
+                "abu dhabi",
+                "qatar",
+                "saudi arabia",
+                "kuwait",
+                "bahrain",
+                "oman"
+            ],
+            "max_jobs_per_day": 10
+        }
+
+    with open(CONFIG_FILE, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+# --------------------------------------------------
+# HTTP JSON REQUEST
+# --------------------------------------------------
+
 def get_json(url):
     try:
         request = urllib.request.Request(
@@ -18,13 +47,19 @@ def get_json(url):
         )
 
         with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return json.loads(
+                response.read().decode("utf-8")
+            )
 
     except Exception as error:
         print(f"Source failed: {url}")
         print(error)
         return None
 
+
+# --------------------------------------------------
+# CLEAN HTML
+# --------------------------------------------------
 
 def clean_html(text):
     if not text:
@@ -58,7 +93,9 @@ def fetch_arbeitnow():
             "company": job.get("company_name", ""),
             "location": job.get("location", ""),
             "url": job.get("url", ""),
-            "description": clean_html(job.get("description", "")),
+            "description": clean_html(
+                job.get("description", "")
+            ),
             "source": "Arbeitnow"
         })
 
@@ -85,9 +122,14 @@ def fetch_remotive():
         jobs.append({
             "title": job.get("title", ""),
             "company": job.get("company_name", ""),
-            "location": job.get("candidate_required_location", ""),
+            "location": job.get(
+                "candidate_required_location",
+                ""
+            ),
             "url": job.get("url", ""),
-            "description": clean_html(job.get("description", "")),
+            "description": clean_html(
+                job.get("description", "")
+            ),
             "source": "Remotive"
         })
 
@@ -100,7 +142,10 @@ def fetch_remotive():
 
 def fetch_jobicy():
 
-    url = "https://jobicy.com/api/v2/remote-jobs?count=50"
+    url = (
+        "https://jobicy.com/api/v2/"
+        "remote-jobs?count=50"
+    )
 
     data = get_json(url)
 
@@ -116,7 +161,9 @@ def fetch_jobicy():
             "company": job.get("companyName", ""),
             "location": job.get("jobGeo", ""),
             "url": job.get("url", ""),
-            "description": clean_html(job.get("jobDescription", "")),
+            "description": clean_html(
+                job.get("jobDescription", "")
+            ),
             "source": "Jobicy"
         })
 
@@ -157,7 +204,10 @@ def matches_title(job):
         "creative content"
     ]
 
-    return any(keyword in title for keyword in keywords)
+    return any(
+        keyword in title
+        for keyword in keywords
+    )
 
 
 # --------------------------------------------------
@@ -174,7 +224,10 @@ def is_excluded(job, config):
         + job["description"]
     ).lower()
 
-    for location in config["exclude_locations"]:
+    for location in config.get(
+        "exclude_locations",
+        []
+    ):
 
         if location.lower() in text:
             return True
@@ -234,7 +287,7 @@ def location_score(job, config):
 
 
 # --------------------------------------------------
-# SALARY DETECTION
+# SALARY SCORE
 # --------------------------------------------------
 
 def salary_score(job):
@@ -257,7 +310,10 @@ def salary_score(job):
 
     for pattern in salary_patterns:
 
-        match = re.search(pattern, text)
+        match = re.search(
+            pattern,
+            text
+        )
 
         if match:
 
@@ -271,8 +327,11 @@ def salary_score(job):
             if numbers:
 
                 try:
+
                     highest = max(
-                        int(number.replace(",", ""))
+                        int(
+                            number.replace(",", "")
+                        )
                         for number in numbers
                     )
 
@@ -290,7 +349,11 @@ def salary_score(job):
 
             break
 
-    job["salary"] = salary_found or "Not listed"
+    job["salary"] = (
+        salary_found
+        if salary_found
+        else "Not listed"
+    )
 
     return score
 
@@ -403,7 +466,6 @@ def score_job(job, config):
 
     title = job["title"].lower()
 
-    # Strong title match
     if "senior" in title:
         score += 20
 
@@ -422,7 +484,10 @@ def score_job(job, config):
     if "content creator" in title:
         score += 20
 
-    score += location_score(job, config)
+    score += location_score(
+        job,
+        config
+    )
 
     score += salary_score(job)
 
@@ -450,15 +515,24 @@ def main():
     all_jobs = []
 
     print("🔎 Searching Arbeitnow...")
-    all_jobs.extend(fetch_arbeitnow())
+    all_jobs.extend(
+        fetch_arbeitnow()
+    )
 
     print("🔎 Searching Remotive...")
-    all_jobs.extend(fetch_remotive())
+    all_jobs.extend(
+        fetch_remotive()
+    )
 
     print("🔎 Searching Jobicy...")
-    all_jobs.extend(fetch_jobicy())
+    all_jobs.extend(
+        fetch_jobicy()
+    )
 
-    print(f"📊 Total jobs found: {len(all_jobs)}")
+    print(
+        f"📊 Total jobs found: "
+        f"{len(all_jobs)}"
+    )
 
     filtered = []
 
@@ -473,10 +547,16 @@ def main():
         if not matches_title(job):
             continue
 
-        if is_excluded(job, config):
+        if is_excluded(
+            job,
+            config
+        ):
             continue
 
-        job["score"] = score_job(job, config)
+        job["score"] = score_job(
+            job,
+            config
+        )
 
         filtered.append(job)
 
@@ -488,7 +568,9 @@ def main():
         if job["url"] not in unique_jobs:
             unique_jobs[job["url"]] = job
 
-    filtered = list(unique_jobs.values())
+    filtered = list(
+        unique_jobs.values()
+    )
 
     # Highest quality jobs first
     filtered.sort(
@@ -504,11 +586,15 @@ def main():
 
     filtered = filtered[:max_jobs]
 
-    print(f"⭐ Strong matches: {len(filtered)}")
+    print(
+        f"⭐ Strong matches: "
+        f"{len(filtered)}"
+    )
 
     # Save results
     output = {
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at":
+            datetime.utcnow().isoformat(),
         "jobs": filtered
     }
 
@@ -526,18 +612,39 @@ def main():
         )
 
     # Print results
-    for number, job in enumerate(filtered, 1):
+    for number, job in enumerate(
+        filtered,
+        1
+    ):
 
         print("")
         print(f"#{number}")
-        print(f"Title: {job['title']}")
-        print(f"Company: {job['company']}")
-        print(f"Location: {job['location']}")
-        print(f"Salary: {job['salary']}")
-        print(f"Score: {job['score']}")
-        print(f"Source: {job['source']}")
-        print(f"URL: {job['url']}")
+        print(
+            f"Title: {job['title']}"
+        )
+        print(
+            f"Company: {job['company']}"
+        )
+        print(
+            f"Location: {job['location']}"
+        )
+        print(
+            f"Salary: {job['salary']}"
+        )
+        print(
+            f"Score: {job['score']}"
+        )
+        print(
+            f"Source: {job['source']}"
+        )
+        print(
+            f"URL: {job['url']}"
+        )
 
+
+# --------------------------------------------------
+# START
+# --------------------------------------------------
 
 if __name__ == "__main__":
     main()
