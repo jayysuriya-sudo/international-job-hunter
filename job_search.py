@@ -1,83 +1,140 @@
 import json
 import os
 import re
-import urllib.parse
 import urllib.request
 from datetime import datetime
 
+
 CONFIG_FILE = "config.json"
+COMPANIES_FILE = "companies.json"
 
 
-# --------------------------------------------------
-# LOAD CONFIG
-# --------------------------------------------------
+# ==================================================
+# BASIC HELPERS
+# ==================================================
 
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        print(f"ERROR: {CONFIG_FILE} not found.")
-        return {
-            "exclude_locations": [
-                "uae",
-                "dubai",
-                "abu dhabi",
-                "qatar",
-                "saudi arabia",
-                "kuwait",
-                "bahrain",
-                "oman"
-            ],
-            "max_jobs_per_day": 10
-        }
+def load_json_file(filename, default=None):
+    try:
+        with open(filename, "r", encoding="utf-8") as file:
+            return json.load(file)
+    except Exception as error:
+        print(f"Could not load {filename}: {error}")
+        return default if default is not None else {}
 
-    with open(CONFIG_FILE, "r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-# --------------------------------------------------
-# HTTP JSON REQUEST
-# --------------------------------------------------
 
 def get_json(url):
     try:
         request = urllib.request.Request(
             url,
             headers={
-                "User-Agent": "Mozilla/5.0 InternationalJobHunter/2.0"
+                "User-Agent": "Mozilla/5.0 InternationalJobHunter/3.0",
+                "Accept": "application/json"
             }
         )
 
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=20) as response:
             return json.loads(
                 response.read().decode("utf-8")
             )
 
     except Exception as error:
-        print(f"Source failed: {url}")
-        print(error)
+        print(f"⚠️ Source unavailable: {url}")
+        print(f"   {error}")
         return None
 
-
-# --------------------------------------------------
-# CLEAN HTML
-# --------------------------------------------------
 
 def clean_html(text):
     if not text:
         return ""
 
-    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"<[^>]+>", " ", str(text))
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
 
 
-# --------------------------------------------------
-# SOURCE 1 — ARBEITNOW
-# --------------------------------------------------
+# ==================================================
+# JOB TITLE MATCHING
+# ==================================================
 
-def fetch_arbeitnow():
+JOB_KEYWORDS = [
+    "videographer",
+    "video editor",
+    "senior video editor",
+    "video producer",
+    "senior video producer",
+    "content creator",
+    "content producer",
+    "creative producer",
+    "film editor",
+    "filmmaker",
+    "post production",
+    "post-production",
+    "multimedia producer",
+    "multimedia editor",
+    "video content",
+    "social video",
+    "social media video",
+    "brand content",
+    "brand video",
+    "creative content",
+    "motion designer",
+    "motion graphics",
+    "motion graphic",
+    "visual content",
+    "digital content producer",
+    "video director",
+    "content director"
+]
 
-    url = "https://www.arbeitnow.com/api/job-board-api"
+
+def matches_title(title):
+    title = title.lower()
+
+    return any(
+        keyword in title
+        for keyword in JOB_KEYWORDS
+    )
+
+
+# ==================================================
+# EXCLUDED LOCATIONS
+# ==================================================
+
+def is_excluded(job, config):
+
+    text = (
+        job.get("title", "")
+        + " "
+        + job.get("location", "")
+        + " "
+        + job.get("description", "")
+    ).lower()
+
+    excluded = config.get(
+        "exclude_locations",
+        []
+    )
+
+    for location in excluded:
+
+        if location.lower() in text:
+            return True
+
+    return False
+
+
+# ==================================================
+# GREENHOUSE
+# ==================================================
+
+def fetch_greenhouse(company):
+
+    url = (
+        "https://boards-api.greenhouse.io/v1/boards/"
+        + company
+        + "/jobs?content=true"
+    )
 
     data = get_json(url)
 
@@ -86,25 +143,120 @@ def fetch_arbeitnow():
 
     jobs = []
 
-    for job in data.get("data", []):
+    for item in data.get("jobs", []):
 
         jobs.append({
-            "title": job.get("title", ""),
-            "company": job.get("company_name", ""),
-            "location": job.get("location", ""),
-            "url": job.get("url", ""),
-            "description": clean_html(
-                job.get("description", "")
+            "title": item.get("title", ""),
+            "company": company,
+            "location": (
+                item.get("location", {})
+                .get("name", "")
             ),
-            "source": "Arbeitnow"
+            "url": item.get("absolute_url", ""),
+            "description": clean_html(
+                item.get("content", "")
+            ),
+            "source": "Greenhouse"
         })
 
     return jobs
 
 
-# --------------------------------------------------
-# SOURCE 2 — REMOTIVE
-# --------------------------------------------------
+# ==================================================
+# LEVER
+# ==================================================
+
+def fetch_lever(company):
+
+    url = (
+        "https://api.lever.co/v0/postings/"
+        + company
+        + "?mode=json"
+    )
+
+    data = get_json(url)
+
+    if not isinstance(data, list):
+        return []
+
+    jobs = []
+
+    for item in data:
+
+        categories = item.get(
+            "categories",
+            {}
+        )
+
+        location = categories.get(
+            "location",
+            ""
+        )
+
+        jobs.append({
+            "title": item.get("text", ""),
+            "company": company,
+            "location": location,
+            "url": item.get("hostedUrl", ""),
+            "description": clean_html(
+                item.get("descriptionPlain", "")
+            ),
+            "source": "Lever"
+        })
+
+    return jobs
+
+
+# ==================================================
+# ASHBY
+# ==================================================
+
+def fetch_ashby(company):
+
+    url = (
+        "https://api.ashbyhq.com/posting-api/"
+        "job-board/"
+        + company
+    )
+
+    data = get_json(url)
+
+    if not data:
+        return []
+
+    jobs = []
+
+    for item in data.get("jobs", []):
+
+        jobs.append({
+            "title": item.get("title", ""),
+            "company": company,
+            "location": item.get(
+                "location",
+                ""
+            ),
+            "url": item.get(
+                "jobUrl",
+                ""
+            ),
+            "description": clean_html(
+                item.get(
+                    "descriptionPlain",
+                    item.get(
+                        "description",
+                        ""
+                    )
+                )
+            ),
+            "source": "Ashby"
+        })
+
+    return jobs
+
+
+# ==================================================
+# REMOTIVE
+# ==================================================
 
 def fetch_remotive():
 
@@ -117,18 +269,21 @@ def fetch_remotive():
 
     jobs = []
 
-    for job in data.get("jobs", []):
+    for item in data.get("jobs", []):
 
         jobs.append({
-            "title": job.get("title", ""),
-            "company": job.get("company_name", ""),
-            "location": job.get(
+            "title": item.get("title", ""),
+            "company": item.get(
+                "company_name",
+                ""
+            ),
+            "location": item.get(
                 "candidate_required_location",
                 ""
             ),
-            "url": job.get("url", ""),
+            "url": item.get("url", ""),
             "description": clean_html(
-                job.get("description", "")
+                item.get("description", "")
             ),
             "source": "Remotive"
         })
@@ -136,9 +291,58 @@ def fetch_remotive():
     return jobs
 
 
-# --------------------------------------------------
-# SOURCE 3 — JOBICY
-# --------------------------------------------------
+# ==================================================
+# ARBEITNOW
+# ==================================================
+
+def fetch_arbeitnow():
+
+    url = (
+        "https://www.arbeitnow.com/"
+        "api/job-board-api"
+    )
+
+    data = get_json(url)
+
+    if not data:
+        return []
+
+    jobs = []
+
+    for item in data.get("data", []):
+
+        jobs.append({
+            "title": item.get(
+                "title",
+                ""
+            ),
+            "company": item.get(
+                "company_name",
+                ""
+            ),
+            "location": item.get(
+                "location",
+                ""
+            ),
+            "url": item.get(
+                "url",
+                ""
+            ),
+            "description": clean_html(
+                item.get(
+                    "description",
+                    ""
+                )
+            ),
+            "source": "Arbeitnow"
+        })
+
+    return jobs
+
+
+# ==================================================
+# JOBICY
+# ==================================================
 
 def fetch_jobicy():
 
@@ -154,15 +358,30 @@ def fetch_jobicy():
 
     jobs = []
 
-    for job in data.get("jobs", []):
+    for item in data.get("jobs", []):
 
         jobs.append({
-            "title": job.get("jobTitle", ""),
-            "company": job.get("companyName", ""),
-            "location": job.get("jobGeo", ""),
-            "url": job.get("url", ""),
+            "title": item.get(
+                "jobTitle",
+                ""
+            ),
+            "company": item.get(
+                "companyName",
+                ""
+            ),
+            "location": item.get(
+                "jobGeo",
+                ""
+            ),
+            "url": item.get(
+                "url",
+                ""
+            ),
             "description": clean_html(
-                job.get("jobDescription", "")
+                item.get(
+                    "jobDescription",
+                    ""
+                )
             ),
             "source": "Jobicy"
         })
@@ -170,216 +389,103 @@ def fetch_jobicy():
     return jobs
 
 
-# --------------------------------------------------
-# JOB TITLE MATCHING
-# --------------------------------------------------
-
-def matches_title(job):
-
-    title = job["title"].lower()
-
-    keywords = [
-        "videographer",
-        "video editor",
-        "video producer",
-        "video production",
-        "content creator",
-        "content producer",
-        "creative producer",
-        "filmmaker",
-        "film editor",
-        "post production",
-        "post-production",
-        "multimedia producer",
-        "multimedia editor",
-        "social video",
-        "social media video",
-        "video content",
-        "motion designer",
-        "motion graphics",
-        "motion graphic",
-        "visual content",
-        "digital content producer",
-        "brand content",
-        "creative content"
-    ]
-
-    return any(
-        keyword in title
-        for keyword in keywords
-    )
-
-
-# --------------------------------------------------
-# EXCLUDED LOCATIONS
-# --------------------------------------------------
-
-def is_excluded(job, config):
-
-    text = (
-        job["location"]
-        + " "
-        + job["title"]
-        + " "
-        + job["description"]
-    ).lower()
-
-    for location in config.get(
-        "exclude_locations",
-        []
-    ):
-
-        if location.lower() in text:
-            return True
-
-    return False
-
-
-# --------------------------------------------------
-# LOCATION SCORE
-# --------------------------------------------------
-
-def location_score(job, config):
-
-    text = (
-        job["location"]
-        + " "
-        + job["description"]
-    ).lower()
-
-    score = 0
-
-    preferred_locations = [
-        "united kingdom",
-        "uk",
-        "london",
-        "canada",
-        "toronto",
-        "vancouver",
-        "australia",
-        "sydney",
-        "melbourne",
-        "germany",
-        "berlin",
-        "munich",
-        "netherlands",
-        "amsterdam",
-        "ireland",
-        "dublin",
-        "sweden",
-        "france",
-        "paris",
-        "united states",
-        "usa",
-        "new york",
-        "los angeles"
-    ]
-
-    for location in preferred_locations:
-
-        if location in text:
-            score += 5
-
-    if "remote" in text:
-        score += 15
-
-    return score
-
-
-# --------------------------------------------------
-# SALARY SCORE
-# --------------------------------------------------
+# ==================================================
+# SALARY
+# ==================================================
 
 def salary_score(job):
 
     text = (
-        job["title"]
+        job.get("title", "")
         + " "
-        + job["description"]
-    ).lower()
+        + job.get("description", "")
+    )
 
-    score = 0
-    salary_found = ""
-
-    salary_patterns = [
+    patterns = [
         r"\$[\d,]+(?:\s*-\s*\$?[\d,]+)?",
         r"£[\d,]+(?:\s*-\s*£?[\d,]+)?",
         r"€[\d,]+(?:\s*-\s*€?[\d,]+)?",
         r"\b\d{2,3}k(?:\s*-\s*\d{2,3}k)?"
     ]
 
-    for pattern in salary_patterns:
+    for pattern in patterns:
 
         match = re.search(
             pattern,
-            text
+            text,
+            re.IGNORECASE
         )
 
         if match:
 
-            salary_found = match.group(0)
+            salary = match.group(0)
 
             numbers = re.findall(
                 r"\d+(?:,\d+)?",
-                salary_found
+                salary
             )
 
-            if numbers:
+            highest = 0
 
+            for number in numbers:
                 try:
-
                     highest = max(
+                        highest,
                         int(
-                            number.replace(",", "")
+                            number.replace(
+                                ",",
+                                ""
+                            )
                         )
-                        for number in numbers
                     )
-
-                    if highest >= 50000:
-                        score += 25
-
-                    elif highest >= 40000:
-                        score += 15
-
-                    elif highest >= 30000:
-                        score += 8
-
                 except ValueError:
                     pass
 
-            break
+            job["salary"] = salary
 
-    job["salary"] = (
-        salary_found
-        if salary_found
-        else "Not listed"
-    )
+            if highest >= 70000:
+                return 35
 
-    return score
+            if highest >= 50000:
+                return 25
+
+            if highest >= 40000:
+                return 15
+
+            if highest >= 30000:
+                return 8
+
+            return 3
+
+    job["salary"] = "Not listed"
+
+    return 0
 
 
-# --------------------------------------------------
-# VISA / RELOCATION SCORE
-# --------------------------------------------------
+# ==================================================
+# VISA / RELOCATION
+# ==================================================
 
 def international_score(job):
 
     text = (
-        job["title"]
+        job.get("title", "")
         + " "
-        + job["description"]
+        + job.get("description", "")
     ).lower()
 
     keywords = [
         "visa sponsorship",
         "visa sponsor",
-        "sponsorship available",
+        "visa support",
         "work visa",
         "work permit",
-        "relocation",
+        "sponsorship available",
+        "immigration support",
         "relocation package",
         "relocation assistance",
-        "immigration support"
+        "relocation support",
+        "relocation"
     ]
 
     score = 0
@@ -392,43 +498,103 @@ def international_score(job):
     return score
 
 
-# --------------------------------------------------
-# SENIORITY SCORE
-# --------------------------------------------------
+# ==================================================
+# LOCATION
+# ==================================================
 
-def seniority_score(job):
+def location_score(job):
 
-    title = job["title"].lower()
+    text = (
+        job.get("location", "")
+        + " "
+        + job.get("description", "")
+    ).lower()
 
-    keywords = [
-        "senior",
-        "lead",
-        "principal",
-        "head",
-        "manager",
-        "director"
+    preferred = [
+        "united kingdom",
+        "uk",
+        "london",
+        "canada",
+        "toronto",
+        "vancouver",
+        "australia",
+        "sydney",
+        "melbourne",
+        "united states",
+        "usa",
+        "new york",
+        "los angeles",
+        "germany",
+        "berlin",
+        "munich",
+        "netherlands",
+        "amsterdam",
+        "ireland",
+        "dublin",
+        "sweden",
+        "france",
+        "paris",
+        "singapore",
+        "new zealand"
     ]
 
     score = 0
 
-    for keyword in keywords:
+    for location in preferred:
 
-        if keyword in title:
-            score += 10
+        if location in text:
+            score += 5
+
+    if "remote" in text:
+        score += 15
 
     return score
 
 
-# --------------------------------------------------
-# CREATIVE INDUSTRY SCORE
-# --------------------------------------------------
+# ==================================================
+# SENIORITY
+# ==================================================
+
+def seniority_score(job):
+
+    title = job.get(
+        "title",
+        ""
+    ).lower()
+
+    score = 0
+
+    if "senior" in title:
+        score += 15
+
+    if "lead" in title:
+        score += 18
+
+    if "principal" in title:
+        score += 18
+
+    if "head" in title:
+        score += 20
+
+    if "manager" in title:
+        score += 18
+
+    if "director" in title:
+        score += 20
+
+    return score
+
+
+# ==================================================
+# CREATIVE INDUSTRY
+# ==================================================
 
 def industry_score(job):
 
     text = (
-        job["title"]
+        job.get("title", "")
         + " "
-        + job["description"]
+        + job.get("description", "")
     ).lower()
 
     keywords = [
@@ -456,95 +622,179 @@ def industry_score(job):
     return score
 
 
-# --------------------------------------------------
-# FINAL JOB SCORE
-# --------------------------------------------------
+# ==================================================
+# FINAL SCORE
+# ==================================================
 
-def score_job(job, config):
+def score_job(job):
+
+    title = job.get(
+        "title",
+        ""
+    ).lower()
 
     score = 0
 
-    title = job["title"].lower()
-
-    if "senior" in title:
-        score += 20
-
-    if "lead" in title:
-        score += 20
-
-    if "producer" in title:
-        score += 15
+    if "videographer" in title:
+        score += 30
 
     if "video editor" in title:
-        score += 25
+        score += 30
 
-    if "videographer" in title:
-        score += 25
+    if "video producer" in title:
+        score += 30
 
     if "content creator" in title:
+        score += 25
+
+    if "content producer" in title:
+        score += 25
+
+    if "creative producer" in title:
+        score += 25
+
+    if "filmmaker" in title:
+        score += 25
+
+    if "motion designer" in title:
         score += 20
 
-    score += location_score(
-        job,
-        config
-    )
-
     score += salary_score(job)
-
     score += international_score(job)
-
+    score += location_score(job)
     score += seniority_score(job)
-
     score += industry_score(job)
 
     return score
 
 
-# --------------------------------------------------
-# MAIN SEARCH
-# --------------------------------------------------
+# ==================================================
+# MAIN
+# ==================================================
 
 def main():
 
-    print("====================================")
-    print("🌍 INTERNATIONAL JOB HUNTER 2.0")
-    print("====================================")
+    print("==========================================")
+    print("🌍 INTERNATIONAL JOB HUNTER 3.0")
+    print("==========================================")
 
-    config = load_config()
+    config = load_json_file(
+        CONFIG_FILE,
+        {}
+    )
+
+    companies = load_json_file(
+        COMPANIES_FILE,
+        {}
+    )
 
     all_jobs = []
 
-    print("🔎 Searching Arbeitnow...")
-    all_jobs.extend(
-        fetch_arbeitnow()
+    # ------------------------------------------
+    # COMPANY BOARDS
+    # ------------------------------------------
+
+    print("")
+    print("🏢 SEARCHING COMPANY CAREER BOARDS")
+    print("------------------------------------------")
+
+    greenhouse = companies.get(
+        "greenhouse",
+        []
     )
 
-    print("🔎 Searching Remotive...")
+    for company in greenhouse:
+
+        print(
+            f"🔎 Greenhouse: {company}"
+        )
+
+        jobs = fetch_greenhouse(
+            company
+        )
+
+        all_jobs.extend(jobs)
+
+    lever = companies.get(
+        "lever",
+        []
+    )
+
+    for company in lever:
+
+        print(
+            f"🔎 Lever: {company}"
+        )
+
+        jobs = fetch_lever(
+            company
+        )
+
+        all_jobs.extend(jobs)
+
+    ashby = companies.get(
+        "ashby",
+        []
+    )
+
+    for company in ashby:
+
+        print(
+            f"🔎 Ashby: {company}"
+        )
+
+        jobs = fetch_ashby(
+            company
+        )
+
+        all_jobs.extend(jobs)
+
+    # ------------------------------------------
+    # GENERAL JOB BOARDS
+    # ------------------------------------------
+
+    print("")
+    print("🌐 SEARCHING GENERAL JOB BOARDS")
+    print("------------------------------------------")
+
+    print("🔎 Remotive...")
     all_jobs.extend(
         fetch_remotive()
     )
 
-    print("🔎 Searching Jobicy...")
+    print("🔎 Arbeitnow...")
+    all_jobs.extend(
+        fetch_arbeitnow()
+    )
+
+    print("🔎 Jobicy...")
     all_jobs.extend(
         fetch_jobicy()
     )
 
+    print("")
     print(
-        f"📊 Total jobs found: "
+        f"📊 TOTAL JOBS FOUND: "
         f"{len(all_jobs)}"
     )
+
+    # ------------------------------------------
+    # FILTER
+    # ------------------------------------------
 
     filtered = []
 
     for job in all_jobs:
 
-        if not job["title"]:
+        if not job.get("title"):
             continue
 
-        if not job["url"]:
+        if not job.get("url"):
             continue
 
-        if not matches_title(job):
+        if not matches_title(
+            job["title"]
+        ):
             continue
 
         if is_excluded(
@@ -554,44 +804,59 @@ def main():
             continue
 
         job["score"] = score_job(
-            job,
-            config
+            job
         )
 
         filtered.append(job)
 
-    # Remove duplicate URLs
-    unique_jobs = {}
+    # ------------------------------------------
+    # REMOVE DUPLICATES
+    # ------------------------------------------
+
+    unique = {}
 
     for job in filtered:
 
-        if job["url"] not in unique_jobs:
-            unique_jobs[job["url"]] = job
+        url = job.get(
+            "url",
+            ""
+        )
+
+        if url and url not in unique:
+            unique[url] = job
 
     filtered = list(
-        unique_jobs.values()
+        unique.values()
     )
 
-    # Highest quality jobs first
+    # ------------------------------------------
+    # SORT
+    # ------------------------------------------
+
     filtered.sort(
         key=lambda job: job["score"],
         reverse=True
     )
 
-    # Keep best jobs
     max_jobs = config.get(
         "max_jobs_per_day",
         10
     )
 
-    filtered = filtered[:max_jobs]
+    filtered = filtered[
+        :max_jobs
+    ]
 
+    print("")
     print(
-        f"⭐ Strong matches: "
+        f"⭐ STRONG MATCHES: "
         f"{len(filtered)}"
     )
 
-    # Save results
+    # ------------------------------------------
+    # SAVE RESULTS
+    # ------------------------------------------
+
     output = {
         "generated_at":
             datetime.utcnow().isoformat(),
@@ -611,40 +876,54 @@ def main():
             ensure_ascii=False
         )
 
-    # Print results
+    # ------------------------------------------
+    # PRINT TOP JOBS
+    # ------------------------------------------
+
     for number, job in enumerate(
         filtered,
         1
     ):
 
         print("")
-        print(f"#{number}")
         print(
-            f"Title: {job['title']}"
-        )
-        print(
-            f"Company: {job['company']}"
-        )
-        print(
-            f"Location: {job['location']}"
-        )
-        print(
-            f"Salary: {job['salary']}"
-        )
-        print(
-            f"Score: {job['score']}"
-        )
-        print(
-            f"Source: {job['source']}"
-        )
-        print(
-            f"URL: {job['url']}"
+            f"#{number} "
+            f"{job['title']}"
         )
 
+        print(
+            f"Company: "
+            f"{job['company']}"
+        )
 
-# --------------------------------------------------
-# START
-# --------------------------------------------------
+        print(
+            f"Location: "
+            f"{job['location']}"
+        )
+
+        print(
+            f"Salary: "
+            f"{job.get('salary', 'Not listed')}"
+        )
+
+        print(
+            f"Score: "
+            f"{job['score']}"
+        )
+
+        print(
+            f"Source: "
+            f"{job['source']}"
+        )
+
+        print(
+            f"URL: "
+            f"{job['url']}"
+        )
+
+    print("")
+    print("✅ JOB SEARCH COMPLETE")
+
 
 if __name__ == "__main__":
     main()
